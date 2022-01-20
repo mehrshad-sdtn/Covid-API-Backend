@@ -16,6 +16,7 @@ const checkAuth = require('./middleware/checkAuth');
 
 
 
+
 mongoose.connect('mongodb+srv://mehrshad:mehrshad1010@ie-final.7fa0l.mongodb.net/IE-final?retryWrites=true&w=majority')
 .then(() => console.log('connected to DB successfully'))
 .catch(err => console.log(err));
@@ -26,8 +27,8 @@ app.use(bodyParser.json());
 
 app.get('/countries', (req, res) => {
     sortParam = url.parse(req.url,true).query.sort;
-    
-    Country.find().sort(sortParam)
+    console.log(sortParam);
+    Country.find().sort(`-${sortParam}`)
     .then(docs => {
         res.status(200).json(docs);
     })
@@ -39,16 +40,10 @@ app.get('/countries', (req, res) => {
 });
 
 
-app.post('/countries/:country', checkAuth, (req, res) => {
-    countryName = utils.capitalize(req.params.country);
-    const country = new Country({
-        _id: new mongoose.Types.ObjectId(),
-        name: countryName,
-        todayCases: 0, 
-        todayDeaths: 0,
-        todayRecovered: 0,
-        critical: 0
-    });
+app.post('/countries/country', checkAuth.superuser, (req, res) => {
+    countryName = utils.capitalize(req.body.name);
+    console.log(countryName);
+    const country = createNewCountry(countryName);  
     country.save()
     .then(result => { 
         console.log(result); 
@@ -60,9 +55,9 @@ app.post('/countries/:country', checkAuth, (req, res) => {
         console.log(err);
         res.status(500).json({error: err});
     });
-    
-
 });
+
+
 
 app.get('/countries/:country', (req, res) => {
     countryName = utils.capitalize(req.params.country);
@@ -82,29 +77,22 @@ app.get('/countries/:country', (req, res) => {
     });
 
 });
+//NOTE: superuser needs token to be validated, token can be recieved by logging in through /superuser/login route
+app.put('/countries/country', checkAuth.superuser, (req, res) => {
+    countryName = utils.capitalize(req.body.name);
+    updateCountryPermissions(req, res);
 
-
-app.put('/countries/:country', (req, res) => {
+});
+// requests to this route go through 2 middleware to validate th admin and check 
+//if admin has permissions to edit that country
+//NOTE: admins are validated with user-pass
+app.put('/countries/:country', checkAuth.admin, checkAuth.hasEditPermission, (req, res) => {
     countryName = utils.capitalize(req.params.country);
-    Country.updateOne({name: countryName}, { 
-        todayCases: req.body.todayCases, 
-        todayDeaths: req.body.todayDeaths,
-        todayRecovered: req.body.todayRecovered,
-        critical: req.body.critical
-    }).exec()
-    .then(result => { 
-        console.log(result); 
-        res.status(201).json({
-            message: "successfull PUT request to /countries",
-          });
-    }).catch(err => {
-        console.log(err);
-        res.status(500).json({error: err});
-    });
+    updateCountryInfromation(req, res, countryName);
 
 });
 //----------------------------------------------
-app.post('/admin', (req, res) => {
+app.post('/admin', checkAuth.superuser, (req, res) => {
     User.find({username: req.body.username}).exec()
     .then(user => {
         if(user.length >= 1) {
@@ -120,21 +108,15 @@ app.post('/admin', (req, res) => {
             res.status(500).json({error: err});
             return;
         }
-        const user = new User({
-            _id: new mongoose.Types.ObjectId(),
-            username: req.body.username,
-            password: pwd
-        });
+        
+        const user = createNewAdmin(req.body.username, pwd);
 
         user.save()
         .then(result => { 
             res.status(201).json({
-                message: "user created",
-                createdUser: result
-              });
+                message: "admin created", createdUser: result });
         }).catch(err => {
             console.log(err);
-            res.status(500).json({error: err});
         });
 
 
@@ -143,21 +125,21 @@ app.post('/admin', (req, res) => {
 });
 
 
-app.post('/admin/login', (req, res) => {
-    User.find({username: req.body.username})
+app.post('/superuser/login', (req, res) => {
+    if (req.body.username !== "superuser"){
+        return res.status(404).json({message: "auth failed, username is not correct"});
+    }
+    
+    User.find({username: "superuser"})
     .exec()
     .then(user => {
-        if (user.length < 1) {
-            console.log("no user found!")
-            return res.status(404).json({message: "auth failed"});
-        }
         bcrypt.compare(req.body.password, user[0].password, (err, result) => {
             if (err) {
                 return res.status(404).json({message: "auth failed"});
             }
             if (result) {
                 const token = jwt.sign(
-                    {username: user[0].username},
+                    {username: "superuser"},
                      'secret', 
                      {expiresIn: '1h'}
                      );
@@ -169,10 +151,67 @@ app.post('/admin/login', (req, res) => {
             }
 
         });
-    })
-    .catch();
+    }).catch(err => { res.status(500).json({error: err}); });
 
 });
+
+const updateCountryInfromation = (req, res, countryName) => {
+    Country.updateOne({name: countryName}, { 
+        todayCases: req.body.todayCases, 
+        todayDeaths: req.body.todayDeaths,
+        todayRecovered: req.body.todayRecovered,
+        critical: req.body.critical
+    }).exec()
+    .then(result => { 
+        console.log(result); 
+        res.status(201).json({
+            message: "successfull PUT request to /countries",
+          });
+    }).catch(err => {
+        console.log(err);
+        res.status(500).json({error: err});
+    });
+}
+
+
+const createNewCountry = (countryName) => {
+    const country = new Country({
+        _id: new mongoose.Types.ObjectId(),
+        name: countryName,
+        todayCases: 0, 
+        todayDeaths: 0,
+        todayRecovered: 0,
+        critical: 0
+    });
+    return country;
+};
+
+const createNewAdmin = (adminUsername, Adminpassword) => {
+    return new User({
+        _id: new mongoose.Types.ObjectId(),
+        username: adminUsername,
+        password: Adminpassword,
+        role:"admin"
+        
+    });
+};
+
+
+const updateCountryPermissions = (req, res) => {
+    Country.updateOne({ name: req.body.name },
+          { $addToSet: { permissions: req.body.adminIDs} })
+    .exec()
+    .then(result => { 
+        console.log(result); 
+        res.status(201).json({
+            message: "successfull PUT request to /countries",
+          });
+    }).catch(err => {
+        console.log(err);
+        res.status(500).json({error: err});
+    });
+
+};
 
 
 const port = process.env.PORT || 3000;

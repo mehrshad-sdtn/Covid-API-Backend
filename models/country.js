@@ -6,7 +6,9 @@ const countrySchema = mongoose.Schema({
     todayCases: Number, 
     todayDeaths: Number,
     todayRecovered: Number,
-    critical: Number
+    critical: Number,
+    permissions: [],
+    updatedAt: {type: Date, default: Date.now}
 });
 
 module.exports = mongoose.model('Country', countrySchema);

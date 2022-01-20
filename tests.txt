@@ -1,0 +1,11 @@
+{
+    "todayCases": 100,
+    "todayDeaths": 20,
+    "todayRecovered": 2,
+    "critical": 5
+}
+
+{
+    "username": "superuser",
+    "password": "superuser1234"
+}
